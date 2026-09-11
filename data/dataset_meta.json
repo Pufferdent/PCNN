@@ -1,0 +1,40 @@
+{
+ "stats": {
+  "files": 1,
+  "sequences": 1,
+  "situations_emitted": 1,
+  "skip_not_full_pc": 0,
+  "skip_stream": 0,
+  "skip_replay_desync": 0,
+  "skip_sfinder_failed": 0,
+  "skip_chosen_not_found": 0,
+  "skip_chosen_no_order": 0,
+  "skip_no_negatives": 0,
+  "sol_no_vstar": 0,
+  "sol_windowed_out": 2215,
+  "sol_glue_failed": 0,
+  "sol_no_playable_order": 0,
+  "sol_capped": 3378,
+  "orders_capped": 1,
+  "samples_pos": 38,
+  "samples_neg": 1002
+ },
+ "weight_config": {
+  "v_window": 1.0,
+  "d_significant": 0.5,
+  "max_boost": 10.0,
+  "pos_ratio": 1.0,
+  "pos_floor": 1.0,
+  "order_weight_mode": "split"
+ },
+ "args": {
+  "data_dir": "/Users/jesse/Documents/PCMode/PC-NN-v3/pc-nn/data/parsed_weighted",
+  "out": "data/smoke.jsonl",
+  "limit_files": null,
+  "limit_seqs": 1,
+  "max_solutions": 40,
+  "max_orders": 64,
+  "sfinder_timeout": 900,
+  "no_cache": false
+ }
+}

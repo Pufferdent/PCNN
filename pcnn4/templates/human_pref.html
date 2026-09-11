@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PC Segment Preference — pairwise comparisons</title>
+<style>
+  :root {
+    --bg: #14161c; --card: #1e2230; --ink: #e8eaf2; --dim: #8b90a3;
+    --accent: #5b8cff; --good: #37c871;
+    --left: #f25f5f; --right: #37c871;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.45 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    display: flex; flex-direction: column; min-height: 100vh;
+  }
+  header {
+    padding: 14px 20px; display: flex; gap: 16px; align-items: center;
+    flex-wrap: wrap; border-bottom: 1px solid #2a2f40;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  select, button {
+    background: var(--card); color: var(--ink); border: 1px solid #343b52;
+    border-radius: 8px; padding: 6px 12px; font-size: 14px; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  .bar { flex: 1; min-width: 160px; height: 10px; background: #262b3d;
+         border-radius: 5px; overflow: hidden; }
+  .bar > div { height: 100%; background: var(--good); width: 0%; }
+  #progressText { color: var(--dim); font-size: 13px; white-space: nowrap; }
+  main { flex: 1; display: flex; flex-direction: column; align-items: center;
+         justify-content: center; padding: 24px 16px; gap: 22px; }
+  .question { color: var(--dim); font-size: 14px; }
+  .question b { color: var(--ink); }
+  .duel { display: flex; gap: 26px; align-items: stretch; flex-wrap: wrap;
+          justify-content: center; }
+  .side {
+    background: var(--card); border: 2px solid #2c3247; border-radius: 14px;
+    padding: 18px 22px; min-width: 240px; text-align: center;
+    transition: border-color .15s;
+  }
+  .side.sel { border-color: var(--accent); }
+  .side h2 { margin: 0 0 12px; font-size: 13px; font-weight: 600;
+             color: var(--dim); letter-spacing: .06em; }
+  .segname { font-size: 30px; font-weight: 700; letter-spacing: .04em; }
+  .segkey { margin-top: 6px; color: var(--dim); font-size: 13px;
+            letter-spacing: .12em; }
+  .vs { align-self: center; color: var(--dim); font-weight: 700; }
+  .scale { display: flex; gap: 5px; flex-wrap: wrap; justify-content: center;
+           max-width: 860px; }
+  .scale button {
+    min-width: 52px; padding: 9px 6px; font-size: 13px; border-radius: 9px;
+  }
+  .scale button.eq { min-width: 64px; }
+  .scale button.l { color: var(--left); border-color: #6b3340; }
+  .scale button.r { color: var(--right); border-color: #2c5a41; }
+  .scale button.picked { background: var(--accent); border-color: var(--accent);
+                         color: #fff; font-weight: 700; }
+  .scale button.picked.l { background: var(--left); border-color: var(--left); }
+  .scale button.picked.r { background: var(--right); border-color: var(--right); }
+  .kkey { font-size: 10px; color: var(--dim); margin-top: 2px; }
+  .scale button.picked .kkey { color: #fff; }
+  #sideA h2 { color: var(--left); }
+  #sideB h2 { color: var(--right); }
+  #sideA.sel { border-color: var(--left); }
+  #sideB.sel { border-color: var(--right); }
+  .hint { color: var(--dim); font-size: 12.5px; text-align: center;
+          max-width: 640px; }
+  nav { display: flex; gap: 10px; align-items: center; }
+  footer { padding: 12px 20px; display: flex; gap: 10px; flex-wrap: wrap;
+           border-top: 1px solid #2a2f40; align-items: center; }
+  footer .spacer { flex: 1; }
+  #fileImport { display: none; }
+  .pcdone { color: var(--good); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Segment preference</h1>
+  <select id="pcSelect"></select>
+  <div class="bar"><div id="barFill"></div></div>
+  <span id="progressText"></span>
+</header>
+
+<main>
+  <div class="question">Going into <b id="pcLabel"></b> — which incoming
+    segment would you rather receive, and how strongly?</div>
+  <div class="duel">
+    <div class="side" id="sideA"><h2>LEFT</h2>
+      <div class="segname" id="nameA"></div><div class="segkey" id="keyA"></div></div>
+    <div class="vs">vs</div>
+    <div class="side" id="sideB"><h2>RIGHT</h2>
+      <div class="segname" id="nameB"></div><div class="segkey" id="keyB"></div></div>
+  </div>
+  <div class="scale" id="scale"></div>
+  <div class="hint">1 : 1 = no real difference &nbsp;·&nbsp; 100 : 1 = would
+    almost always take that side. Picking saves and advances.
+    Keys: <b>1&ndash;9</b> pick (5 = 1:1), <b>&larr;/&rarr;</b> prev / next,
+    <b>u</b> jump to first unanswered.</div>
+  <nav>
+    <button id="prevBtn">&larr; Previous</button>
+    <span id="posText" style="color:var(--dim);font-size:13px"></span>
+    <button id="nextBtn">Next &rarr;</button>
+  </nav>
+</main>
+
+<footer>
+  <button id="exportBtn">Export results JSON</button>
+  <button id="importBtn">Import JSON</button>
+  <input type="file" id="fileImport" accept=".json">
+  <span class="spacer"></span>
+  <span id="saveNote" style="color:var(--dim);font-size:12.5px">
+    Autosaves to this browser (localStorage).</span>
+  <button id="resetBtn">Reset all</button>
+</footer>
+
+<script>
+const COMPARISONS = __COMPARISONS__;
+const NAMES = __NAMES__;
+const STORE_KEY = 'pcnn4_human_pref_v1';
+// 9 options, keys 1-9 left to right; 5 = 1:1
+const SCALE = [
+  {label: '100 : 1', r: 100,     side: 'l'},
+  {label: '20 : 1',  r: 20,      side: 'l'},
+  {label: '5 : 1',   r: 5,       side: 'l'},
+  {label: '2 : 1',   r: 2,       side: 'l'},
+  {label: '1 : 1',   r: 1,       side: 'eq'},
+  {label: '1 : 2',   r: 1 / 2,   side: 'r'},
+  {label: '1 : 5',   r: 1 / 5,   side: 'r'},
+  {label: '1 : 20',  r: 1 / 20,  side: 'r'},
+  {label: '1 : 100', r: 1 / 100, side: 'r'},
+];
+
+let answers = {};
+try { answers = JSON.parse(localStorage.getItem(STORE_KEY)) || {}; }
+catch (e) { answers = {}; }
+
+const byPc = {};
+COMPARISONS.forEach(c => (byPc[c.pc] = byPc[c.pc] || []).push(c));
+const pcs = Object.keys(byPc).map(Number).sort((a, b) => a - b);
+let curPc = pcs[0], curIdx = 0;
+
+// restore last position
+try {
+  const pos = JSON.parse(localStorage.getItem(STORE_KEY + '_pos'));
+  if (pos && byPc[pos.pc] && pos.i < byPc[pos.pc].length) {
+    curPc = pos.pc; curIdx = pos.i;
+  }
+} catch (e) {}
+
+function savePos() {
+  localStorage.setItem(STORE_KEY + '_pos',
+                       JSON.stringify({pc: curPc, i: curIdx}));
+}
+function saveAnswers() {
+  localStorage.setItem(STORE_KEY, JSON.stringify(answers));
+}
+function answeredIn(pc) {
+  return byPc[pc].reduce((n, c) => n + (c.id in answers ? 1 : 0), 0);
+}
+function totalAnswered() {
+  return pcs.reduce((n, pc) => n + answeredIn(pc), 0);
+}
+
+function segLetters(key) {
+  // duplicated pieces first, remaining pieces alphabetical after them
+  const counts = {};
+  for (const ch of key) counts[ch] = (counts[ch] || 0) + 1;
+  return [...key].sort((a, b) =>
+      (counts[b] - counts[a]) || a.localeCompare(b)).join(' ');
+}
+
+function renderSegment(nameEl, keyEl, key) {
+  nameEl.textContent = NAMES[key] || key;
+  keyEl.textContent = segLetters(key);
+}
+
+function buildScale() {
+  const scale = document.getElementById('scale');
+  scale.innerHTML = '';
+  SCALE.forEach((s, i) => {
+    const b = document.createElement('button');
+    b.className = s.side;
+    b.dataset.ratio = s.r;
+    b.innerHTML = s.label + '<div class="kkey">' + (i + 1) + '</div>';
+    b.onclick = () => pick(s.r);
+    scale.appendChild(b);
+  });
+}
+
+function render() {
+  const list = byPc[curPc], c = list[curIdx];
+  document.getElementById('pcLabel').textContent = 'PC ' + curPc;
+  renderSegment(document.getElementById('nameA'),
+                document.getElementById('keyA'), c.a);
+  renderSegment(document.getElementById('nameB'),
+                document.getElementById('keyB'), c.b);
+
+  const cur = answers[c.id];
+  document.querySelectorAll('#scale button').forEach(b => {
+    const r = parseFloat(b.dataset.ratio);
+    b.classList.toggle('picked',
+        cur !== undefined && Math.abs(r - cur) / cur < 1e-9);
+  });
+  document.getElementById('sideA').classList.toggle('sel',
+      cur !== undefined && cur > 1);
+  document.getElementById('sideB').classList.toggle('sel',
+      cur !== undefined && cur < 1);
+
+  const done = answeredIn(curPc), tot = list.length;
+  const allDone = totalAnswered(), allTot = COMPARISONS.length;
+  document.getElementById('posText').textContent =
+      (curIdx + 1) + ' / ' + tot;
+  document.getElementById('progressText').textContent =
+      'PC' + curPc + ': ' + done + '/' + tot +
+      ' · total: ' + allDone + '/' + allTot;
+  document.getElementById('barFill').style.width =
+      (100 * allDone / allTot).toFixed(1) + '%';
+
+  const sel = document.getElementById('pcSelect');
+  pcs.forEach((pc, i) => {
+    const d = answeredIn(pc), t = byPc[pc].length;
+    sel.options[i].text = 'PC ' + pc + '  (' + d + '/' + t + ')' +
+                          (d === t ? ' ✓' : '');
+  });
+  sel.value = curPc;
+  savePos();
+}
+
+function pick(ratio) {
+  const c = byPc[curPc][curIdx];
+  answers[c.id] = ratio;
+  saveAnswers();
+  setTimeout(() => move(1), 120);
+  render();
+}
+
+function move(step) {
+  const list = byPc[curPc];
+  let i = curIdx + step;
+  if (i >= list.length) {
+    const at = pcs.indexOf(curPc);
+    if (at < pcs.length - 1) { curPc = pcs[at + 1]; i = 0; }
+    else i = list.length - 1;
+  } else if (i < 0) {
+    const at = pcs.indexOf(curPc);
+    if (at > 0) { curPc = pcs[at - 1]; i = byPc[curPc].length - 1; }
+    else i = 0;
+  }
+  curIdx = i;
+  render();
+}
+
+function jumpUnanswered() {
+  for (const pc of pcs) {
+    const list = byPc[pc];
+    for (let i = 0; i < list.length; i++) {
+      if (!(list[i].id in answers)) { curPc = pc; curIdx = i; render(); return; }
+    }
+  }
+  alert('All ' + COMPARISONS.length + ' comparisons answered — export!');
+}
+
+document.getElementById('prevBtn').onclick = () => move(-1);
+document.getElementById('nextBtn').onclick = () => move(1);
+document.getElementById('pcSelect').onchange = e => {
+  curPc = parseInt(e.target.value); curIdx = 0; render();
+};
+document.getElementById('exportBtn').onclick = () => {
+  const blob = new Blob(
+      [JSON.stringify({answers: answers}, null, 1)],
+      {type: 'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'human_pref_results.json';
+  a.click();
+};
+document.getElementById('importBtn').onclick = () =>
+    document.getElementById('fileImport').click();
+document.getElementById('fileImport').onchange = e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  f.text().then(t => {
+    const data = JSON.parse(t);
+    const imported = data.answers || data;
+    Object.assign(answers, imported);
+    saveAnswers(); render();
+  });
+};
+document.getElementById('resetBtn').onclick = () => {
+  if (confirm('Delete ALL saved answers in this browser?')) {
+    answers = {}; saveAnswers(); render();
+  }
+};
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowLeft') move(-1);
+  else if (e.key === 'ArrowRight') move(1);
+  else if (e.key === 'u') jumpUnanswered();
+  else if (e.key >= '1' && e.key <= '9') pick(SCALE[e.key - 1].r);
+});
+
+const sel = document.getElementById('pcSelect');
+pcs.forEach(pc => {
+  const o = document.createElement('option');
+  o.value = pc; o.text = 'PC ' + pc;
+  sel.appendChild(o);
+});
+buildScale();
+render();
+</script>
+</body>
+</html>

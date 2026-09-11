@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PC Segment Ranking — sort &amp; gaps</title>
+<style>
+  :root {
+    --bg: #14161c; --card: #1e2230; --ink: #e8eaf2; --dim: #8b90a3;
+    --accent: #5b8cff; --good: #37c871; --warn: #f2b84f; --bad: #f25f5f;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 14px/1.4 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+  header {
+    position: sticky; top: 0; z-index: 10; background: var(--bg);
+    padding: 12px 18px; display: flex; gap: 14px; align-items: center;
+    flex-wrap: wrap; border-bottom: 1px solid #2a2f40;
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  select, button {
+    background: var(--card); color: var(--ink); border: 1px solid #343b52;
+    border-radius: 8px; padding: 6px 11px; font-size: 13px; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  .legend { color: var(--dim); font-size: 12px; }
+  #list { max-width: 780px; margin: 14px auto 60px; padding: 0 14px; }
+  .row {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--card); border: 1px solid #2c3247; border-radius: 10px;
+    padding: 7px 12px; margin-top: 6px; cursor: grab;
+  }
+  .row.dragging { opacity: .4; }
+  .row.selected { border-color: var(--accent);
+                  box-shadow: 0 0 0 1px var(--accent); }
+  .row .rank { width: 34px; color: var(--dim); font-size: 12px;
+               text-align: right; flex-shrink: 0; }
+  .row .name { font-weight: 700; font-size: 16px; min-width: 90px; }
+  .row .letters { color: var(--dim); font-size: 12px; letter-spacing: .1em; }
+  .row .tier { font-size: 10.5px; padding: 2px 7px; border-radius: 999px;
+               font-weight: 700; letter-spacing: .04em; flex-shrink: 0; }
+  .tier.top { background: #1d3a2a; color: var(--good); }
+  .tier.mid { background: #3a331d; color: var(--warn); }
+  .tier.bad { background: #3a1d1d; color: var(--bad); }
+  .row .spacer { flex: 1; }
+  .movers { display: flex; flex-direction: column; gap: 2px; }
+  .movers button { padding: 0 7px; font-size: 10px; line-height: 1.5;
+                   border-radius: 5px; }
+  .gapchip {
+    min-width: 58px; text-align: center; font-weight: 700; font-size: 12.5px;
+    border-radius: 7px; padding: 4px 7px; cursor: pointer; flex-shrink: 0;
+    background: #262b3d; border: 1px solid #343b52; user-select: none;
+  }
+  .gapchip.g0 { color: var(--dim); }
+  .gapchip.g1 { color: #9fc0ff; }
+  .gapchip.g2 { color: var(--accent); }
+  .gapchip.g3 { color: var(--warn); }
+  .gapchip.g4 { color: var(--bad); }
+  .gapchip.top-anchor { cursor: default; color: var(--dim);
+                        background: transparent; border-color: transparent; }
+  .val { width: 74px; text-align: right; font-variant-numeric: tabular-nums;
+         font-size: 13px; flex-shrink: 0; }
+  .bar { width: 90px; height: 7px; background: #262b3d; border-radius: 4px;
+         overflow: hidden; flex-shrink: 0; }
+  .bar > div { height: 100%; background: var(--accent); }
+  footer {
+    position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg);
+    border-top: 1px solid #2a2f40; padding: 10px 18px; display: flex;
+    gap: 10px; align-items: center; flex-wrap: wrap;
+  }
+  footer .spacer { flex: 1; }
+  #fileImport { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Segment ranking</h1>
+  <select id="pcSelect"></select>
+  <span class="legend">Drag rows (or ▲▼) to reorder — any time. Click a
+    gap chip to grow the step from the row above
+    (= &rarr; &gt; &rarr; &gt;&gt; &rarr; &gt;&gt;&gt; &rarr;
+    &gt;&gt;&gt;&gt; &rarr; =); shift-click shrinks. Top = 100.
+    Keys: <b>W/S</b> select row, <b>A/D</b> shrink/grow its gap,
+    <b>Shift+W/S</b> move the row.</span>
+</header>
+
+<div id="list"></div>
+
+<footer>
+  <button id="exportBtn">Export results JSON</button>
+  <button id="importBtn">Import JSON</button>
+  <input type="file" id="fileImport" accept=".json">
+  <button id="resetBtn">Reset this PC to default order</button>
+  <span class="spacer"></span>
+  <span class="legend">Autosaves to this browser (localStorage).</span>
+</footer>
+
+<script>
+const DATA = __DATA__;
+const STORE_KEY = 'pcnn4_human_sort_v1';
+const GAPS = [1, 1.2, 2, 5, 20];
+const GAP_LABELS = ['=', '>', '>>', '>>>', '>>>>'];
+
+const pcs = Object.keys(DATA).map(Number).sort((a, b) => a - b);
+const byKey = {};
+pcs.forEach(pc => DATA[pc].forEach(it => byKey[it.k] = it));
+
+function defaultState(pc) {
+  return {order: DATA[pc].map(it => it.k),
+          gaps: DATA[pc].slice(1).map(() => 1)};
+}
+
+let state = {};
+try { state = JSON.parse(localStorage.getItem(STORE_KEY)) || {}; }
+catch (e) { state = {}; }
+pcs.forEach(pc => {
+  const st = state[pc];
+  const def = defaultState(pc);
+  // discard stale saves that don't match the current segment list
+  if (!st || st.order.length !== def.order.length ||
+      [...st.order].sort().join() !== [...def.order].sort().join()) {
+    state[pc] = def;
+  }
+});
+
+let curPc = pcs[0];
+let selIdx = 0;
+try {
+  const p = parseInt(localStorage.getItem(STORE_KEY + '_pc'));
+  if (pcs.includes(p)) curPc = p;
+} catch (e) {}
+
+function save() {
+  localStorage.setItem(STORE_KEY, JSON.stringify(state));
+  localStorage.setItem(STORE_KEY + '_pc', String(curPc));
+}
+
+function values(pc) {
+  const st = state[pc];
+  const out = [];
+  let v = 100;
+  st.order.forEach((k, i) => {
+    if (i > 0) v /= st.gaps[i - 1];
+    out.push(v);
+  });
+  return out;
+}
+
+function fmt(v) {
+  if (v >= 10) return v.toFixed(0);
+  if (v >= 0.1) return v.toPrecision(3);
+  return v.toExponential(1);
+}
+
+let dragged = null;
+
+function render() {
+  const st = state[curPc];
+  const vals = values(curPc);
+  const minLog = Math.log10(Math.max(vals[vals.length - 1], 1e-12));
+  const span = Math.max(2 - minLog, 1e-9);
+  const list = document.getElementById('list');
+  list.innerHTML = '';
+
+  st.order.forEach((k, i) => {
+    const it = byKey[k];
+    const row = document.createElement('div');
+    row.className = 'row' + (i === selIdx ? ' selected' : '');
+    row.draggable = true;
+    row.dataset.key = k;
+    row.addEventListener('mousedown', () => {
+      if (selIdx !== i) { selIdx = i; render(); }
+    });
+
+    const gap = document.createElement('div');
+    if (i === 0) {
+      gap.className = 'gapchip top-anchor';
+      gap.textContent = 'TOP';
+    } else {
+      const gi = GAPS.indexOf(st.gaps[i - 1]);
+      gap.className = 'gapchip g' + (gi < 0 ? 0 : gi);
+      gap.textContent = GAP_LABELS[gi < 0 ? 0 : gi];
+      gap.title = 'step from row above: x' + st.gaps[i - 1];
+      gap.onclick = (e) => {
+        const cur = GAPS.indexOf(st.gaps[i - 1]);
+        const next = e.shiftKey
+            ? (cur - 1 + GAPS.length) % GAPS.length
+            : (cur + 1) % GAPS.length;
+        st.gaps[i - 1] = GAPS[next];
+        save(); render();
+      };
+    }
+    row.appendChild(gap);
+
+    const rank = document.createElement('div');
+    rank.className = 'rank';
+    rank.textContent = '#' + (i + 1);
+    row.appendChild(rank);
+
+    const name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = it.name;
+    row.appendChild(name);
+
+    const letters = document.createElement('div');
+    letters.className = 'letters';
+    letters.textContent = [...it.k].join(' ');
+    row.appendChild(letters);
+
+    if (it.tier) {
+      const tier = document.createElement('div');
+      tier.className = 'tier ' + it.tier;
+      tier.textContent = it.tier.toUpperCase();
+      row.appendChild(tier);
+    }
+
+    const spacer = document.createElement('div');
+    spacer.className = 'spacer';
+    row.appendChild(spacer);
+
+    const movers = document.createElement('div');
+    movers.className = 'movers';
+    [['▲', -1], ['▼', 1]].forEach(([sym, d]) => {
+      const b = document.createElement('button');
+      b.textContent = sym;
+      b.onclick = () => {
+        const j = i + d;
+        if (j < 0 || j >= st.order.length) return;
+        [st.order[i], st.order[j]] = [st.order[j], st.order[i]];
+        save(); render();
+      };
+      movers.appendChild(b);
+    });
+    row.appendChild(movers);
+
+    const bar = document.createElement('div');
+    bar.className = 'bar';
+    const fill = document.createElement('div');
+    const frac = (Math.log10(Math.max(vals[i], 1e-12)) - minLog) / span;
+    fill.style.width = Math.max(2, 100 * frac).toFixed(1) + '%';
+    bar.appendChild(fill);
+    row.appendChild(bar);
+
+    const val = document.createElement('div');
+    val.className = 'val';
+    val.textContent = fmt(vals[i]);
+    row.appendChild(val);
+
+    row.addEventListener('dragstart', () => {
+      dragged = row; row.classList.add('dragging');
+    });
+    row.addEventListener('dragend', () => {
+      row.classList.remove('dragging');
+      dragged = null;
+      st.order = [...list.children].map(r => r.dataset.key);
+      save(); render();
+    });
+    list.appendChild(row);
+  });
+}
+
+document.getElementById('list').addEventListener('dragover', e => {
+  e.preventDefault();
+  if (!dragged) return;
+  const target = e.target.closest('.row');
+  if (!target || target === dragged) return;
+  const rect = target.getBoundingClientRect();
+  const before = e.clientY < rect.top + rect.height / 2;
+  target.parentNode.insertBefore(dragged,
+      before ? target : target.nextSibling);
+});
+
+document.getElementById('pcSelect').onchange = e => {
+  curPc = parseInt(e.target.value); selIdx = 0;
+  save(); render(); refreshSelect();
+  window.scrollTo(0, 0);
+};
+
+function scrollSelectedIntoView() {
+  const el = document.querySelector('.row.selected');
+  if (el) el.scrollIntoView({block: 'nearest'});
+}
+
+document.addEventListener('keydown', e => {
+  const key = e.key.toLowerCase();
+  if (!'wasd'.includes(key) || e.metaKey || e.ctrlKey || e.altKey) return;
+  const st = state[curPc];
+  const n = st.order.length;
+  e.preventDefault();
+  if (key === 'w' || key === 's') {
+    const d = key === 'w' ? -1 : 1;
+    if (e.shiftKey) {                         // move the selected row
+      const j = selIdx + d;
+      if (j < 0 || j >= n) return;
+      [st.order[selIdx], st.order[j]] = [st.order[j], st.order[selIdx]];
+      selIdx = j;
+      save();
+    } else {                                  // move the selection
+      selIdx = Math.min(n - 1, Math.max(0, selIdx + d));
+    }
+  } else {                                    // a/d: shrink/grow gap
+    if (selIdx === 0) return;                 // top row has no gap
+    const cur = GAPS.indexOf(st.gaps[selIdx - 1]);
+    const next = Math.min(GAPS.length - 1,
+                          Math.max(0, (cur < 0 ? 0 : cur) +
+                                      (key === 'd' ? 1 : -1)));
+    st.gaps[selIdx - 1] = GAPS[next];
+    save();
+  }
+  render();
+  scrollSelectedIntoView();
+});
+function refreshSelect() {
+  const sel = document.getElementById('pcSelect');
+  sel.innerHTML = '';
+  pcs.forEach(pc => {
+    const o = document.createElement('option');
+    o.value = pc;
+    o.text = 'PC ' + pc + '  (' + DATA[pc].length + ' segments)';
+    sel.appendChild(o);
+  });
+  sel.value = curPc;
+}
+
+document.getElementById('exportBtn').onclick = () => {
+  const blob = new Blob(
+      [JSON.stringify({tool: 'human_sort', state: state}, null, 1)],
+      {type: 'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'human_sort_results.json';
+  a.click();
+};
+document.getElementById('importBtn').onclick = () =>
+    document.getElementById('fileImport').click();
+document.getElementById('fileImport').onchange = e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  f.text().then(t => {
+    const data = JSON.parse(t);
+    const imported = data.state || data;
+    Object.keys(imported).forEach(pc => { state[pc] = imported[pc]; });
+    save(); render();
+  });
+};
+document.getElementById('resetBtn').onclick = () => {
+  if (confirm('Reset PC ' + curPc + ' to the default order (all gaps =)?')) {
+    state[curPc] = defaultState(curPc);
+    save(); render();
+  }
+};
+
+refreshSelect();
+render();
+</script>
+</body>
+</html>

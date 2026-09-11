@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PC Segment Ranking — sort &amp; gaps</title>
+<style>
+  :root {
+    --bg: #14161c; --card: #1e2230; --ink: #e8eaf2; --dim: #8b90a3;
+    --accent: #5b8cff; --good: #37c871; --warn: #f2b84f; --bad: #f25f5f;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 14px/1.4 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+  header {
+    position: sticky; top: 0; z-index: 10; background: var(--bg);
+    padding: 12px 18px; display: flex; gap: 14px; align-items: center;
+    flex-wrap: wrap; border-bottom: 1px solid #2a2f40;
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  select, button {
+    background: var(--card); color: var(--ink); border: 1px solid #343b52;
+    border-radius: 8px; padding: 6px 11px; font-size: 13px; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  .legend { color: var(--dim); font-size: 12px; }
+  #list { max-width: 780px; margin: 14px auto 60px; padding: 0 14px; }
+  .row {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--card); border: 1px solid #2c3247; border-radius: 10px;
+    padding: 7px 12px; margin-top: 6px; cursor: grab;
+  }
+  .row.dragging { opacity: .4; }
+  .row.selected { border-color: var(--accent);
+                  box-shadow: 0 0 0 1px var(--accent); }
+  .row .rank { width: 34px; color: var(--dim); font-size: 12px;
+               text-align: right; flex-shrink: 0; }
+  .row .name { font-weight: 700; font-size: 16px; min-width: 90px; }
+  .row .letters { color: var(--dim); font-size: 12px; letter-spacing: .1em; }
+  .row .tier { font-size: 10.5px; padding: 2px 7px; border-radius: 999px;
+               font-weight: 700; letter-spacing: .04em; flex-shrink: 0; }
+  .tier.top { background: #1d3a2a; color: var(--good); }
+  .tier.mid { background: #3a331d; color: var(--warn); }
+  .tier.bad { background: #3a1d1d; color: var(--bad); }
+  .row .spacer { flex: 1; }
+  .movers { display: flex; flex-direction: column; gap: 2px; }
+  .movers button { padding: 0 7px; font-size: 10px; line-height: 1.5;
+                   border-radius: 5px; }
+  .gapchip {
+    min-width: 58px; text-align: center; font-weight: 700; font-size: 12.5px;
+    border-radius: 7px; padding: 4px 7px; cursor: pointer; flex-shrink: 0;
+    background: #262b3d; border: 1px solid #343b52; user-select: none;
+  }
+  .gapchip.g0 { color: var(--dim); }
+  .gapchip.g1 { color: #9fc0ff; }
+  .gapchip.g2 { color: var(--accent); }
+  .gapchip.g3 { color: var(--warn); }
+  .gapchip.g4 { color: var(--bad); }
+  .gapchip.top-anchor { cursor: default; color: var(--dim);
+                        background: transparent; border-color: transparent; }
+  .val { width: 74px; text-align: right; font-variant-numeric: tabular-nums;
+         font-size: 13px; flex-shrink: 0; }
+  .bar { width: 90px; height: 7px; background: #262b3d; border-radius: 4px;
+         overflow: hidden; flex-shrink: 0; }
+  .bar > div { height: 100%; background: var(--accent); }
+  footer {
+    position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg);
+    border-top: 1px solid #2a2f40; padding: 10px 18px; display: flex;
+    gap: 10px; align-items: center; flex-wrap: wrap;
+  }
+  footer .spacer { flex: 1; }
+  #fileImport { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Segment ranking</h1>
+  <select id="pcSelect"></select>
+  <span class="legend">Drag rows (or ▲▼) to reorder — any time. Click a
+    gap chip to grow the step from the row above
+    (= &rarr; &gt; &rarr; &gt;&gt; &rarr; &gt;&gt;&gt; &rarr;
+    &gt;&gt;&gt;&gt; &rarr; =); shift-click shrinks. Top = 100.
+    Keys: <b>W/S</b> select row, <b>A/D</b> shrink/grow its gap,
+    <b>Shift+W/S</b> move the row.</span>
+</header>
+
+<div id="list"></div>
+
+<footer>
+  <button id="exportBtn">Export results JSON</button>
+  <button id="importBtn">Import JSON</button>
+  <input type="file" id="fileImport" accept=".json">
+  <button id="resetBtn">Reset this PC to default order</button>
+  <span class="spacer"></span>
+  <span class="legend">Autosaves to this browser (localStorage).</span>
+</footer>
+
+<script>
+const DATA = {"1":[{"k":"IJLSTTZ","name":"T>O","tier":null,"vstar":4353.5735},{"k":"IJLOSTT","name":"T>Z","tier":null,"vstar":4353.5731},{"k":"IJLOTTZ","name":"T>S","tier":null,"vstar":4353.573},{"k":"IIJLOTZ","name":"I>S","tier":null,"vstar":4353.4059},{"k":"IIJLSTZ","name":"I>O","tier":null,"vstar":4353.3992},{"k":"IIJLOST","name":"I>Z","tier":null,"vstar":4353.3988},{"k":"JLOSTTZ","name":"T>I","tier":null,"vstar":4353.3891},{"k":"IJJLOST","name":"J>Z","tier":null,"vstar":4353.0824},{"k":"IJLLOTZ","name":"L>S","tier":null,"vstar":4353.0607},{"k":"IJJLOTZ","name":"J>S","tier":null,"vstar":4352.9817},{"k":"IJLLOST","name":"L>Z","tier":null,"vstar":4352.9817},{"k":"IJLOOTZ","name":"O>S","tier":null,"vstar":4352.8066},{"k":"IJLOOST","name":"O>Z","tier":null,"vstar":4352.7994},{"k":"IJJLSTZ","name":"J>O","tier":null,"vstar":4352.6361},{"k":"IJLLSTZ","name":"L>O","tier":null,"vstar":4352.6361},{"k":"ILOSTTZ","name":"T>J","tier":null,"vstar":4350.016},{"k":"IJOSTTZ","name":"T>L","tier":null,"vstar":4349.9798},{"k":"IJLOSST","name":"S>Z","tier":null,"vstar":4348.7527},{"k":"IJLOTZZ","name":"Z>S","tier":null,"vstar":4348.7097},{"k":"IJLSTZZ","name":"Z>O","tier":null,"vstar":4346.2549},{"k":"IJLSSTZ","name":"S>O","tier":null,"vstar":4346.2476},{"k":"JJLOSTZ","name":"J>I","tier":null,"vstar":4342.8473},{"k":"JLLOSTZ","name":"L>I","tier":null,"vstar":4342.8472},{"k":"IJLOSTZ","name":"full","tier":null,"vstar":4339.2638},{"k":"IILOSTZ","name":"I>J","tier":null,"vstar":4335.5707},{"k":"IIJOSTZ","name":"I>L","tier":null,"vstar":4335.5419},{"k":"ILLOSTZ","name":"L>J","tier":null,"vstar":4334.0523},{"k":"IJJOSTZ","name":"J>L","tier":null,"vstar":4333.5686},{"k":"JLOOSTZ","name":"O>I","tier":null,"vstar":4326.834},{"k":"JLOSTZZ","name":"Z>I","tier":null,"vstar":4319.4838},{"k":"JLOSSTZ","name":"S>I","tier":null,"vstar":4319.4694},{"k":"ILOOSTZ","name":"O>J","tier":null,"vstar":4319.4241},{"k":"IJOOSTZ","name":"O>L","tier":null,"vstar":4319.4097},{"k":"ILOSSTZ","name":"S>J","tier":null,"vstar":4291.2227},{"k":"IJOSTZZ","name":"Z>L","tier":null,"vstar":4291.0645},{"k":"IJOSSTZ","name":"S>L","tier":null,"vstar":4258.364},{"k":"ILOSTZZ","name":"Z>J","tier":null,"vstar":4258.0036},{"k":"IJLLOSZ","name":"L>T","tier":null,"vstar":4250.743},{"k":"IJJLOSZ","name":"J>T","tier":null,"vstar":4250.3394},{"k":"IIJLOSZ","name":"I>T","tier":null,"vstar":4246.3531},{"k":"IJLOOSZ","name":"O>T","tier":null,"vstar":4234.8028},{"k":"IJLOSZZ","name":"Z>T","tier":null,"vstar":3973.8307},{"k":"IJLOSSZ","name":"S>T","tier":null,"vstar":3973.385}],"2":[{"k":"IJLO","name":"IJLO","tier":"top","vstar":4352.5748},{"k":"IJLS","name":"IJLS","tier":"top","vstar":4352.5748},{"k":"IJLZ","name":"IJLZ","tier":"top","vstar":4352.5748},{"k":"JLSZ","name":"JLSZ","tier":"top","vstar":4352.5745},{"k":"JLOS","name":"JLOS","tier":"top","vstar":4352.5744},{"k":"JLOZ","name":"JLOZ","tier":"top","vstar":4352.5743},{"k":"IOSZ","name":"IOSZ","tier":"top","vstar":4352.5703},{"k":"IJLT","name":"IJLT","tier":"mid","vstar":4352.575},{"k":"JLST","name":"JLST","tier":"mid","vstar":4352.5748},{"k":"JLTZ","name":"JLTZ","tier":"mid","vstar":4352.5747},{"k":"JLOT","name":"JLOT","tier":"mid","vstar":4352.5746},{"k":"ILST","name":"ILST","tier":"mid","vstar":4352.5727},{"k":"IOST","name":"IOST","tier":"mid","vstar":4352.5727},{"k":"IJTZ","name":"IJTZ","tier":"mid","vstar":4352.5726},{"k":"IOTZ","name":"IOTZ","tier":"mid","vstar":4352.5726},{"k":"IJST","name":"IJST","tier":"mid","vstar":4352.5715},{"k":"ILTZ","name":"ILTZ","tier":"mid","vstar":4352.5714},{"k":"ILOT","name":"ILOT","tier":"mid","vstar":4352.5713},{"k":"IJOT","name":"IJOT","tier":"mid","vstar":4352.5712},{"k":"JOTZ","name":"JOTZ","tier":"mid","vstar":4352.5668},{"k":"LOST","name":"LOST","tier":"mid","vstar":4352.5668},{"k":"LOTZ","name":"LOTZ","tier":"mid","vstar":4352.5644},{"k":"JOST","name":"JOST","tier":"mid","vstar":4352.5643},{"k":"LSTZ","name":"LSTZ","tier":"mid","vstar":4352.563},{"k":"JSTZ","name":"JSTZ","tier":"mid","vstar":4352.5629},{"k":"ISTZ","name":"ISTZ","tier":"mid","vstar":4352.5499},{"k":"OSTZ","name":"OSTZ","tier":"mid","vstar":4352.4658},{"k":"ILOZ","name":"ILOZ","tier":"bad","vstar":4351.1289},{"k":"IJOS","name":"IJOS","tier":"bad","vstar":4351.1287},{"k":"IJOZ","name":"IJOZ","tier":"bad","vstar":4351.1004},{"k":"ILOS","name":"ILOS","tier":"bad","vstar":4351.0999},{"k":"IJSZ","name":"IJSZ","tier":"bad","vstar":4350.7457},{"k":"ILSZ","name":"ILSZ","tier":"bad","vstar":4350.7452},{"k":"LOSZ","name":"LOSZ","tier":"bad","vstar":4348.9252},{"k":"JOSZ","name":"JOSZ","tier":"bad","vstar":4348.9246}],"3":[{"k":"T","name":"T","tier":"top","vstar":4351.5722},{"k":"I","name":"I","tier":"mid","vstar":4350.5427},{"k":"L","name":"L","tier":"mid","vstar":4348.1778},{"k":"J","name":"J","tier":"mid","vstar":4348.1612},{"k":"O","name":"O","tier":"mid","vstar":4341.8925},{"k":"S","name":"S","tier":"bad","vstar":4321.6747},{"k":"Z","name":"Z","tier":"bad","vstar":4321.6602}],"4":[{"k":"IJLOT","name":"no SZ","tier":"top","vstar":4351.0034},{"k":"IIJLT","name":"I>OSZ","tier":"top","vstar":4351.001},{"k":"IJJOT","name":"J>LSZ","tier":"top","vstar":4350.9932},{"k":"ILLOT","name":"L>JSZ","tier":"top","vstar":4350.9931},{"k":"JLOOT","name":"O>ISZ","tier":"top","vstar":4350.9809},{"k":"IJJLT","name":"J>OSZ","tier":"top","vstar":4350.8673},{"k":"IJLLT","name":"L>OSZ","tier":"top","vstar":4350.8668},{"k":"ILOOT","name":"O>JSZ","tier":"top","vstar":4350.8636},{"k":"IJOOT","name":"O>LSZ","tier":"top","vstar":4350.8633},{"k":"JLLOT","name":"L>ISZ","tier":"top","vstar":4350.8566},{"k":"JJLOT","name":"J>ISZ","tier":"top","vstar":4350.8565},{"k":"IILOT","name":"I>JSZ","tier":"top","vstar":4350.8544},{"k":"IIJOT","name":"I>LSZ","tier":"top","vstar":4350.8543},{"k":"IJLOZ","name":"no ST","tier":"top","vstar":4350.781},{"k":"IJLTZ","name":"no OS","tier":"top","vstar":4350.4035},{"k":"IJLST","name":"no OZ","tier":"top","vstar":4350.4035},{"k":"ILLTZ","name":"L>JOS","tier":"top","vstar":4350.4029},{"k":"IJJST","name":"J>LOZ","tier":"top","vstar":4350.4027},{"k":"IIJST","name":"I>LOZ","tier":"top","vstar":4350.3967},{"k":"IILTZ","name":"I>JOS","tier":"top","vstar":4350.3966},{"k":"IJLTT","name":"T>OSZ","tier":"top","vstar":4350.3949},{"k":"IJJTZ","name":"J>LOS","tier":"top","vstar":4350.394},{"k":"ILLST","name":"L>JOZ","tier":"top","vstar":4350.394},{"k":"IILST","name":"I>JOZ","tier":"top","vstar":4350.3901},{"k":"IIJTZ","name":"I>LOS","tier":"top","vstar":4350.3897},{"k":"JLSTZ","name":"no IO","tier":"top","vstar":4350.3863},{"k":"ILTTZ","name":"T>JOS","tier":"top","vstar":4350.3855},{"k":"IJSTT","name":"T>LOZ","tier":"top","vstar":4350.3855},{"k":"JJLTZ","name":"J>IOS","tier":"top","vstar":4350.3848},{"k":"JLLST","name":"L>IOZ","tier":"top","vstar":4350.3847},{"k":"JLLTZ","name":"L>IOS","tier":"top","vstar":4350.3822},{"k":"JJLST","name":"J>IOZ","tier":"top","vstar":4350.3821},{"k":"JLTTZ","name":"T>IOS","tier":"top","vstar":4350.3816},{"k":"JLSTT","name":"T>IOZ","tier":"top","vstar":4350.3816},{"k":"LLSTZ","name":"L>IJO","tier":"top","vstar":4350.3799},{"k":"JJSTZ","name":"J>ILO","tier":"top","vstar":4350.3797},{"k":"IJTTZ","name":"T>LOS","tier":"top","vstar":4350.3793},{"k":"ILSTT","name":"T>JOZ","tier":"top","vstar":4350.3792},{"k":"JJOST","name":"J>ILZ","tier":"top","vstar":4350.3775},{"k":"LLOTZ","name":"L>IJS","tier":"top","vstar":4350.3775},{"k":"ILSTZ","name":"no JO","tier":"top","vstar":4350.377},{"k":"IJSTZ","name":"no LO","tier":"top","vstar":4350.3769},{"k":"ILOTT","name":"T>JSZ","tier":"top","vstar":4350.3734},{"k":"IJOTT","name":"T>LSZ","tier":"top","vstar":4350.3734},{"k":"JLSST","name":"S>IOZ","tier":"top","vstar":4350.3732},{"k":"JLTZZ","name":"Z>IOS","tier":"top","vstar":4350.3732},{"k":"LOOTZ","name":"O>IJS","tier":"top","vstar":4350.3692},{"k":"JOOST","name":"O>ILZ","tier":"top","vstar":4350.3691},{"k":"JLOST","name":"no IZ","tier":"top","vstar":4350.3665},{"k":"JLOTZ","name":"no IS","tier":"top","vstar":4350.3664},{"k":"JLOTT","name":"T>ISZ","tier":"top","vstar":4350.365},{"k":"IJSST","name":"S>LOZ","tier":"top","vstar":4350.3632},{"k":"ILOTZ","name":"no JS","tier":"top","vstar":4350.3632},{"k":"IJOST","name":"no LZ","tier":"top","vstar":4350.3632},{"k":"ILTZZ","name":"Z>JOS","tier":"top","vstar":4350.3629},{"k":"ILOST","name":"no JZ","tier":"top","vstar":4350.3586},{"k":"IJOTZ","name":"no LS","tier":"top","vstar":4350.3585},{"k":"LOTTZ","name":"T>IJS","tier":"top","vstar":4350.3578},{"k":"JOSTT","name":"T>ILZ","tier":"top","vstar":4350.3578},{"k":"LLOST","name":"L>IJZ","tier":"top","vstar":4350.3573},{"k":"JJOTZ","name":"J>ILS","tier":"top","vstar":4350.3571},{"k":"JSTTZ","name":"T>ILO","tier":"top","vstar":4350.3565},{"k":"LSTTZ","name":"T>IJO","tier":"top","vstar":4350.3564},{"k":"LOOST","name":"O>IJZ","tier":"top","vstar":4350.3537},{"k":"JOOTZ","name":"O>ILS","tier":"top","vstar":4350.3537},{"k":"IOOTZ","name":"O>JLS","tier":"top","vstar":4350.3465},{"k":"IOOST","name":"O>JLZ","tier":"top","vstar":4350.3465},{"k":"LOSTT","name":"T>IJZ","tier":"top","vstar":4350.3439},{"k":"JOTTZ","name":"T>ILS","tier":"top","vstar":4350.3437},{"k":"ILSST","name":"S>JOZ","tier":"top","vstar":4350.3391},{"k":"IJTZZ","name":"Z>LOS","tier":"top","vstar":4350.339},{"k":"LSSTZ","name":"S>IJO","tier":"top","vstar":4350.3327},{"k":"JSTZZ","name":"Z>ILO","tier":"top","vstar":4350.3324},{"k":"LOSTZ","name":"no IJ","tier":"top","vstar":4350.3298},{"k":"ISTTZ","name":"T>JLO","tier":"top","vstar":4350.3277},{"k":"JSSTZ","name":"S>ILO","tier":"top","vstar":4350.3273},{"k":"LSTZZ","name":"Z>IJO","tier":"top","vstar":4350.3272},{"k":"IIOTZ","name":"I>JLS","tier":"top","vstar":4350.3263},{"k":"IIOST","name":"I>JLZ","tier":"top","vstar":4350.3263},{"k":"JOSST","name":"S>ILZ","tier":"top","vstar":4350.3244},{"k":"LOTZZ","name":"Z>IJS","tier":"top","vstar":4350.3241},{"k":"IISTZ","name":"I>JLO","tier":"top","vstar":4350.3214},{"k":"IOSTT","name":"T>JLZ","tier":"top","vstar":4350.3151},{"k":"IOTTZ","name":"T>JLS","tier":"top","vstar":4350.3149},{"k":"ISSTZ","name":"S>JLO","tier":"top","vstar":4350.3031},{"k":"ISTZZ","name":"Z>JLO","tier":"top","vstar":4350.3031},{"k":"IOTZZ","name":"Z>JLS","tier":"top","vstar":4350.2904},{"k":"IOSST","name":"S>JLZ","tier":"top","vstar":4350.2903},{"k":"LOSST","name":"S>IJZ","tier":"top","vstar":4350.2867},{"k":"JOTZZ","name":"Z>ILS","tier":"top","vstar":4350.2867},{"k":"OSTTZ","name":"T>IJL","tier":"top","vstar":4350.2839},{"k":"OSTZZ","name":"Z>IJL","tier":"top","vstar":4350.0142},{"k":"OSSTZ","name":"S>IJL","tier":"top","vstar":4350.0141},{"k":"OOSTZ","name":"O>IJL","tier":"top","vstar":4349.1201},{"k":"ILOSZ","name":"no JT","tier":"top","vstar":4309.0111},{"k":"IJLOO","name":"O>STZ","tier":"mid","vstar":4352.6538},{"k":"IIJLO","name":"I>STZ","tier":"mid","vstar":4351.731},{"k":"IJLOS","name":"no TZ","tier":"mid","vstar":4350.781},{"k":"IIJLZ","name":"I>OST","tier":"mid","vstar":4350.5025},{"k":"IIJLS","name":"I>OTZ","tier":"mid","vstar":4350.5024},{"k":"ILLOZ","name":"L>JST","tier":"mid","vstar":4350.4687},{"k":"IJJOS","name":"J>LTZ","tier":"mid","vstar":4350.4686},{"k":"ILLSZ","name":"L>JOT","tier":"mid","vstar":4350.339},{"k":"IJJSZ","name":"J>LOT","tier":"mid","vstar":4350.3386},{"k":"JOSTZ","name":"no IL","tier":"mid","vstar":4350.3297},{"k":"IOSTZ","name":"no JL","tier":"mid","vstar":4350.2777},{"k":"IJLSS","name":"S>OTZ","tier":"mid","vstar":4349.7665},{"k":"IJLZZ","name":"Z>OST","tier":"mid","vstar":4349.7664},{"k":"IJJOZ","name":"J>LST","tier":"mid","vstar":4349.3054},{"k":"ILLOS","name":"L>JTZ","tier":"mid","vstar":4349.3054},{"k":"JLOOZ","name":"O>IST","tier":"mid","vstar":4341.3855},{"k":"JLOOS","name":"O>ITZ","tier":"mid","vstar":4341.3854},{"k":"JJOSZ","name":"J>ILT","tier":"mid","vstar":4335.5047},{"k":"LLOSZ","name":"L>IJT","tier":"mid","vstar":4335.2533},{"k":"JLOSS","name":"S>ITZ","tier":"mid","vstar":4325.357},{"k":"JLOZZ","name":"Z>IST","tier":"mid","vstar":4325.2841},{"k":"JLSSZ","name":"S>IOT","tier":"mid","vstar":4299.9073},{"k":"JLSZZ","name":"Z>IOT","tier":"mid","vstar":4299.9072},{"k":"IIOSZ","name":"I>JLT","tier":"mid","vstar":4087.1494},{"k":"IOOSZ","name":"O>JLT","tier":"mid","vstar":4048.9967},{"k":"IOSZZ","name":"Z>JLT","tier":"mid","vstar":4043.6806},{"k":"IOSSZ","name":"S>JLT","tier":"mid","vstar":4043.6804},{"k":"IJLLO","name":"L>STZ","tier":"bad","vstar":4351.4485},{"k":"IJJLO","name":"J>STZ","tier":"bad","vstar":4351.4461},{"k":"IJJLS","name":"J>OTZ","tier":"bad","vstar":4350.2274},{"k":"IJLLZ","name":"L>OST","tier":"bad","vstar":4350.2274},{"k":"IJJLZ","name":"J>OST","tier":"bad","vstar":4350.1941},{"k":"IJLLS","name":"L>OTZ","tier":"bad","vstar":4350.1941},{"k":"JLLOZ","name":"L>IST","tier":"bad","vstar":4350.1714},{"k":"JJLOS","name":"J>ITZ","tier":"bad","vstar":4350.1712},{"k":"IILOS","name":"I>JTZ","tier":"bad","vstar":4350.0641},{"k":"IIJOZ","name":"I>LST","tier":"bad","vstar":4350.0641},{"k":"IIJOS","name":"I>LTZ","tier":"bad","vstar":4350.0572},{"k":"IILOZ","name":"I>JST","tier":"bad","vstar":4350.0571},{"k":"ILOOZ","name":"O>JST","tier":"bad","vstar":4349.6227},{"k":"IJOOS","name":"O>LTZ","tier":"bad","vstar":4349.6226},{"k":"JJLSZ","name":"J>IOT","tier":"bad","vstar":4349.5974},{"k":"JLLSZ","name":"L>IOT","tier":"bad","vstar":4349.5974},{"k":"JLLOS","name":"L>ITZ","tier":"bad","vstar":4349.3076},{"k":"JJLOZ","name":"J>IST","tier":"bad","vstar":4349.3075},{"k":"IJLSZ","name":"no OT","tier":"bad","vstar":4347.6474},{"k":"ILOOS","name":"O>JTZ","tier":"bad","vstar":4342.3347},{"k":"IJOOZ","name":"O>LST","tier":"bad","vstar":4342.3341},{"k":"JLOSZ","name":"no IT","tier":"bad","vstar":4340.5527},{"k":"IIJSZ","name":"I>LOT","tier":"bad","vstar":4338.8809},{"k":"IILSZ","name":"I>JOT","tier":"bad","vstar":4338.5234},{"k":"IJOSS","name":"S>LTZ","tier":"bad","vstar":4326.8663},{"k":"ILOZZ","name":"Z>JST","tier":"bad","vstar":4326.8309},{"k":"ILOSS","name":"S>JTZ","tier":"bad","vstar":4321.2122},{"k":"IJOZZ","name":"Z>LST","tier":"bad","vstar":4321.1396},{"k":"IJOSZ","name":"no LT","tier":"bad","vstar":4308.9817},{"k":"IJSSZ","name":"S>LOT","tier":"bad","vstar":4258.6142},{"k":"ILSZZ","name":"Z>JOT","tier":"bad","vstar":4258.6142},{"k":"ILSSZ","name":"S>JOT","tier":"bad","vstar":4255.1153},{"k":"IJSZZ","name":"Z>LOT","tier":"bad","vstar":4254.6838},{"k":"JOOSZ","name":"O>ILT","tier":"bad","vstar":4165.2284},{"k":"LOOSZ","name":"O>IJT","tier":"bad","vstar":4162.9335},{"k":"LOSSZ","name":"S>IJT","tier":"bad","vstar":4099.5149},{"k":"JOSZZ","name":"Z>ILT","tier":"bad","vstar":4099.5149},{"k":"LOSZZ","name":"Z>IJT","tier":"bad","vstar":4008.1135},{"k":"JOSSZ","name":"S>ILT","tier":"bad","vstar":4006.89}],"5":[{"k":"JL","name":"JL","tier":"top","vstar":4349.4472},{"k":"LL","name":"LL","tier":"top","vstar":4349.4406},{"k":"JJ","name":"JJ","tier":"top","vstar":4349.44},{"k":"IL","name":"IL","tier":"top","vstar":4349.4009},{"k":"IJ","name":"IJ","tier":"top","vstar":4349.4008},{"k":"II","name":"II","tier":"top","vstar":4349.3369},{"k":"IO","name":"IO","tier":"top","vstar":4349.3341},{"k":"OT","name":"OT","tier":"top","vstar":4349.219},{"k":"LT","name":"LT","tier":"top","vstar":4349.2028},{"k":"JT","name":"JT","tier":"top","vstar":4349.2026},{"k":"IT","name":"IT","tier":"top","vstar":4349.1702},{"k":"TZ","name":"TZ","tier":"top","vstar":4349.0553},{"k":"ST","name":"ST","tier":"top","vstar":4349.0544},{"k":"TT","name":"TT","tier":"top","vstar":4348.7432},{"k":"IS","name":"IS","tier":"top","vstar":4348.3662},{"k":"IZ","name":"IZ","tier":"top","vstar":4348.3649},{"k":"LO","name":"LO","tier":"mid","vstar":4349.332},{"k":"JO","name":"JO","tier":"mid","vstar":4349.3315},{"k":"LZ","name":"LZ","tier":"mid","vstar":4348.0772},{"k":"JS","name":"JS","tier":"mid","vstar":4348.0762},{"k":"LS","name":"LS","tier":"mid","vstar":4348.0553},{"k":"JZ","name":"JZ","tier":"mid","vstar":4348.048},{"k":"OO","name":"OO","tier":"bad","vstar":4348.754},{"k":"OZ","name":"OZ","tier":"bad","vstar":4347.7022},{"k":"OS","name":"OS","tier":"bad","vstar":4347.7017},{"k":"SZ","name":"SZ","tier":"bad","vstar":4335.4383},{"k":"SS","name":"SS","tier":"bad","vstar":4332.7079},{"k":"ZZ","name":"ZZ","tier":"bad","vstar":4332.6794}],"6":[{"k":"IJLOOT","name":"O>SZ","tier":"top","vstar":4352.5723},{"k":"IJLTTZ","name":"T>OS","tier":"top","vstar":4349.5237},{"k":"IJLSTT","name":"T>OZ","tier":"top","vstar":4349.5237},{"k":"IJLOTT","name":"T>SZ","tier":"top","vstar":4349.5136},{"k":"IJJLOT","name":"J>SZ","tier":"top","vstar":4349.5075},{"k":"IJLLOT","name":"L>SZ","tier":"top","vstar":4349.5071},{"k":"IJLLTZ","name":"L>OS","tier":"top","vstar":4349.5032},{"k":"IJJLST","name":"J>OZ","tier":"top","vstar":4349.5029},{"k":"IJJLTZ","name":"J>OS","tier":"top","vstar":4349.5002},{"k":"IJLLST","name":"L>OZ","tier":"top","vstar":4349.5002},{"k":"IIJLOT","name":"I>SZ","tier":"top","vstar":4349.4951},{"k":"IIJLST","name":"I>OZ","tier":"top","vstar":4349.4931},{"k":"IIJLTZ","name":"I>OS","tier":"top","vstar":4349.4929},{"k":"IJSTTZ","name":"T>LO","tier":"top","vstar":4349.4797},{"k":"ILSTTZ","name":"T>JO","tier":"top","vstar":4349.4795},{"k":"IJOTTZ","name":"T>LS","tier":"top","vstar":4349.462},{"k":"ILOSTT","name":"T>JZ","tier":"top","vstar":4349.4619},{"k":"IJLTZZ","name":"Z>OS","tier":"top","vstar":4349.4515},{"k":"IJLSST","name":"S>OZ","tier":"top","vstar":4349.4513},{"k":"IJOOST","name":"O>LZ","tier":"top","vstar":4349.4436},{"k":"ILOOTZ","name":"O>JS","tier":"top","vstar":4349.4435},{"k":"IJOSTT","name":"T>LZ","tier":"top","vstar":4349.4424},{"k":"ILOTTZ","name":"T>JS","tier":"top","vstar":4349.4423},{"k":"IIJOST","name":"I>LZ","tier":"top","vstar":4349.4358},{"k":"IILOTZ","name":"I>JS","tier":"top","vstar":4349.4356},{"k":"IILOST","name":"I>JZ","tier":"top","vstar":4349.4256},{"k":"IIJOTZ","name":"I>LS","tier":"top","vstar":4349.4255},{"k":"IILSTZ","name":"I>JO","tier":"top","vstar":4349.4228},{"k":"IIJSTZ","name":"I>LO","tier":"top","vstar":4349.4224},{"k":"ILOOST","name":"O>JZ","tier":"top","vstar":4349.421},{"k":"IJOOTZ","name":"O>LS","tier":"top","vstar":4349.4209},{"k":"ILLOTZ","name":"L>JS","tier":"top","vstar":4349.3665},{"k":"IJJOST","name":"J>LZ","tier":"top","vstar":4349.3664},{"k":"IJLOST","name":"no Z","tier":"top","vstar":4349.2379},{"k":"IJLOTZ","name":"no S","tier":"top","vstar":4349.204},{"k":"IJLSTZ","name":"no O","tier":"top","vstar":4349.1158},{"k":"IJOSST","name":"S>LZ","tier":"top","vstar":4348.9743},{"k":"ILOTZZ","name":"Z>JS","tier":"top","vstar":4348.9454},{"k":"ILLOST","name":"L>JZ","tier":"top","vstar":4348.6034},{"k":"IJJOTZ","name":"J>LS","tier":"top","vstar":4348.5449},{"k":"ILSSTZ","name":"S>JO","tier":"top","vstar":4348.4942},{"k":"IJSTZZ","name":"Z>LO","tier":"top","vstar":4348.4797},{"k":"ILLSTZ","name":"L>JO","tier":"top","vstar":4348.2854},{"k":"IJJSTZ","name":"J>LO","tier":"top","vstar":4348.2562},{"k":"ILOSST","name":"S>JZ","tier":"top","vstar":4347.8334},{"k":"IJOTZZ","name":"Z>LS","tier":"top","vstar":4347.8334},{"k":"ILOSTZ","name":"no J","tier":"top","vstar":4346.4884},{"k":"IJOSTZ","name":"no L","tier":"top","vstar":4346.4829},{"k":"ILSTZZ","name":"Z>JO","tier":"top","vstar":4345.6602},{"k":"IJSSTZ","name":"S>LO","tier":"top","vstar":4345.6316},{"k":"IOSTTZ","name":"T>JL","tier":"top","vstar":4344.0507},{"k":"IIOSTZ","name":"I>JL","tier":"top","vstar":4302.9149},{"k":"IOOSTZ","name":"O>JL","tier":"top","vstar":4274.8499},{"k":"IOSTZZ","name":"Z>JL","tier":"top","vstar":4269.8945},{"k":"IOSSTZ","name":"S>JL","tier":"top","vstar":4269.6643},{"k":"JLSTTZ","name":"T>IO","tier":"mid","vstar":4349.5024},{"k":"JLOTTZ","name":"T>IS","tier":"mid","vstar":4349.4885},{"k":"JLOSTT","name":"T>IZ","tier":"mid","vstar":4349.4885},{"k":"JJLSTZ","name":"J>IO","tier":"mid","vstar":4349.4687},{"k":"JLLSTZ","name":"L>IO","tier":"mid","vstar":4349.4687},{"k":"JLLOTZ","name":"L>IS","tier":"mid","vstar":4349.4686},{"k":"JJLOST","name":"J>IZ","tier":"mid","vstar":4349.4684},{"k":"JLLOST","name":"L>IZ","tier":"mid","vstar":4349.4627},{"k":"JJLOTZ","name":"J>IS","tier":"mid","vstar":4349.4624},{"k":"JLOOST","name":"O>IZ","tier":"mid","vstar":4349.1117},{"k":"JLOOTZ","name":"O>IS","tier":"mid","vstar":4349.1115},{"k":"JOSTTZ","name":"T>IL","tier":"mid","vstar":4348.4697},{"k":"LOSTTZ","name":"T>IJ","tier":"mid","vstar":4348.4695},{"k":"JLSSTZ","name":"S>IO","tier":"mid","vstar":4347.5106},{"k":"JLSTZZ","name":"Z>IO","tier":"mid","vstar":4347.4808},{"k":"JLOSST","name":"S>IZ","tier":"mid","vstar":4347.4106},{"k":"JLOTZZ","name":"Z>IS","tier":"mid","vstar":4347.4105},{"k":"JJOSTZ","name":"J>IL","tier":"mid","vstar":4342.8683},{"k":"LLOSTZ","name":"L>IJ","tier":"mid","vstar":4342.8391},{"k":"JLOSTZ","name":"no I","tier":"mid","vstar":4341.4552},{"k":"JOOSTZ","name":"O>IL","tier":"mid","vstar":4339.7726},{"k":"LOOSTZ","name":"O>IJ","tier":"mid","vstar":4339.7725},{"k":"LOSSTZ","name":"S>IJ","tier":"mid","vstar":4333.8285},{"k":"JOSTZZ","name":"Z>IL","tier":"mid","vstar":4333.8285},{"k":"LOSTZZ","name":"Z>IJ","tier":"mid","vstar":4316.6301},{"k":"JOSSTZ","name":"S>IL","tier":"mid","vstar":4316.5728},{"k":"IJLOOZ","name":"O>ST","tier":"bad","vstar":4349.8794},{"k":"IJLOOS","name":"O>TZ","tier":"bad","vstar":4349.8769},{"k":"IJLLSZ","name":"L>OT","tier":"bad","vstar":4347.7188},{"k":"IJJLSZ","name":"J>OT","tier":"bad","vstar":4347.7185},{"k":"IJLLOZ","name":"L>ST","tier":"bad","vstar":4347.491},{"k":"IJJLOS","name":"J>TZ","tier":"bad","vstar":4347.4623},{"k":"IJJLOZ","name":"J>ST","tier":"bad","vstar":4347.3313},{"k":"IJLLOS","name":"L>TZ","tier":"bad","vstar":4347.2451},{"k":"IIJLOS","name":"I>TZ","tier":"bad","vstar":4337.162},{"k":"IIJLOZ","name":"I>ST","tier":"bad","vstar":4337.1331},{"k":"JLLOSZ","name":"L>IT","tier":"bad","vstar":4327.4296},{"k":"JJLOSZ","name":"J>IT","tier":"bad","vstar":4327.4291},{"k":"IIJLSZ","name":"I>OT","tier":"bad","vstar":4300.9732},{"k":"IILOSZ","name":"I>JT","tier":"bad","vstar":4271.0148},{"k":"IIJOSZ","name":"I>LT","tier":"bad","vstar":4270.8565},{"k":"IJLOSS","name":"S>TZ","tier":"bad","vstar":4264.7053},{"k":"IJLOZZ","name":"Z>ST","tier":"bad","vstar":4264.7051},{"k":"IJLOSZ","name":"no T","tier":"bad","vstar":4238.7445},{"k":"ILLOSZ","name":"L>JT","tier":"bad","vstar":4219.7536},{"k":"IJJOSZ","name":"J>LT","tier":"bad","vstar":4219.7385},{"k":"ILOOSZ","name":"O>JT","tier":"bad","vstar":4214.2109},{"k":"IJOOSZ","name":"O>LT","tier":"bad","vstar":4214.1245},{"k":"IJLSSZ","name":"S>OT","tier":"bad","vstar":4189.8896},{"k":"IJLSZZ","name":"Z>OT","tier":"bad","vstar":4189.2414},{"k":"JLOOSZ","name":"O>IT","tier":"bad","vstar":4142.1664},{"k":"ILOSSZ","name":"S>JT","tier":"bad","vstar":4125.4144},{"k":"IJOSZZ","name":"Z>LT","tier":"bad","vstar":4125.1407},{"k":"ILOSZZ","name":"Z>JT","tier":"bad","vstar":4014.5862},{"k":"IJOSSZ","name":"S>LT","tier":"bad","vstar":4014.3704},{"k":"JLOSZZ","name":"Z>IT","tier":"bad","vstar":3842.4795},{"k":"JLOSSZ","name":"S>IT","tier":"bad","vstar":3842.2773}],"7":[{"k":"IIJ","name":"IIJ","tier":null,"vstar":4349.0372},{"k":"IIL","name":"IIL","tier":null,"vstar":4349.0347},{"k":"IJT","name":"IJT","tier":null,"vstar":4349.0046},{"k":"ILT","name":"ILT","tier":null,"vstar":4349.0044},{"k":"JJL","name":"JJL","tier":null,"vstar":4348.9447},{"k":"JLL","name":"JLL","tier":null,"vstar":4348.9443},{"k":"IJO","name":"IJO","tier":null,"vstar":4348.9319},{"k":"ILO","name":"ILO","tier":null,"vstar":4348.9311},{"k":"ITT","name":"ITT","tier":null,"vstar":4348.744},{"k":"LOO","name":"LOO","tier":null,"vstar":4348.7205},{"k":"JOO","name":"JOO","tier":null,"vstar":4348.7201},{"k":"IIT","name":"IIT","tier":null,"vstar":4348.7002},{"k":"LOT","name":"LOT","tier":null,"vstar":4348.646},{"k":"JOT","name":"JOT","tier":null,"vstar":4348.6447},{"k":"OTT","name":"OTT","tier":null,"vstar":4348.62},{"k":"JTT","name":"JTT","tier":null,"vstar":4348.5507},{"k":"LTT","name":"LTT","tier":null,"vstar":4348.5507},{"k":"LTZ","name":"LTZ","tier":null,"vstar":4348.5228},{"k":"JST","name":"JST","tier":null,"vstar":4348.5222},{"k":"LLT","name":"LLT","tier":null,"vstar":4348.48},{"k":"JJT","name":"JJT","tier":null,"vstar":4348.4797},{"k":"JLT","name":"JLT","tier":null,"vstar":4348.4443},{"k":"IOT","name":"IOT","tier":null,"vstar":4348.384},{"k":"TTZ","name":"TTZ","tier":null,"vstar":4348.3072},{"k":"STT","name":"STT","tier":null,"vstar":4348.306},{"k":"JTZ","name":"JTZ","tier":null,"vstar":4348.2705},{"k":"LST","name":"LST","tier":null,"vstar":4348.2696},{"k":"IJJ","name":"IJJ","tier":null,"vstar":4348.2358},{"k":"ILL","name":"ILL","tier":null,"vstar":4348.2352},{"k":"JLO","name":"JLO","tier":null,"vstar":4348.1303},{"k":"IST","name":"IST","tier":null,"vstar":4348.0949},{"k":"ITZ","name":"ITZ","tier":null,"vstar":4348.0931},{"k":"OOT","name":"OOT","tier":null,"vstar":4347.9141},{"k":"ILZ","name":"ILZ","tier":null,"vstar":4347.8077},{"k":"IJS","name":"IJS","tier":null,"vstar":4347.8061},{"k":"OTZ","name":"OTZ","tier":null,"vstar":4347.7728},{"k":"OST","name":"OST","tier":null,"vstar":4347.7716},{"k":"IJZ","name":"IJZ","tier":null,"vstar":4347.665},{"k":"ILS","name":"ILS","tier":null,"vstar":4347.6628},{"k":"IOO","name":"IOO","tier":null,"vstar":4347.5884},{"k":"STZ","name":"STZ","tier":null,"vstar":4347.3348},{"k":"LOZ","name":"LOZ","tier":null,"vstar":4347.3292},{"k":"JOS","name":"JOS","tier":null,"vstar":4347.3234},{"k":"IJL","name":"IJL","tier":null,"vstar":4347.2498},{"k":"JOZ","name":"JOZ","tier":null,"vstar":4347.1348},{"k":"LOS","name":"LOS","tier":null,"vstar":4347.1342},{"k":"LSZ","name":"LSZ","tier":null,"vstar":4346.8404},{"k":"JSZ","name":"JSZ","tier":null,"vstar":4346.8327},{"k":"JJO","name":"JJO","tier":null,"vstar":4346.7036},{"k":"LLO","name":"LLO","tier":null,"vstar":4346.7034},{"k":"JLZ","name":"JLZ","tier":null,"vstar":4346.6627},{"k":"JLS","name":"JLS","tier":null,"vstar":4346.6613},{"k":"LZZ","name":"LZZ","tier":null,"vstar":4346.6078},{"k":"JSS","name":"JSS","tier":null,"vstar":4346.6051},{"k":"LLZ","name":"LLZ","tier":null,"vstar":4346.5805},{"k":"JJS","name":"JJS","tier":null,"vstar":4346.5798},{"k":"IIO","name":"IIO","tier":null,"vstar":4346.5063},{"k":"LLS","name":"LLS","tier":null,"vstar":4346.389},{"k":"JJZ","name":"JJZ","tier":null,"vstar":4346.38},{"k":"TZZ","name":"TZZ","tier":null,"vstar":4346.3162},{"k":"SST","name":"SST","tier":null,"vstar":4346.315},{"k":"IOZ","name":"IOZ","tier":null,"vstar":4345.9287},{"k":"IOS","name":"IOS","tier":null,"vstar":4345.9281},{"k":"JZZ","name":"JZZ","tier":null,"vstar":4345.8145},{"k":"LSS","name":"LSS","tier":null,"vstar":4345.8128},{"k":"IIZ","name":"IIZ","tier":null,"vstar":4345.7372},{"k":"IIS","name":"IIS","tier":null,"vstar":4345.7365},{"k":"ISZ","name":"ISZ","tier":null,"vstar":4345.2511},{"k":"ISS","name":"ISS","tier":null,"vstar":4345.0404},{"k":"IZZ","name":"IZZ","tier":null,"vstar":4345.0378},{"k":"OOZ","name":"OOZ","tier":null,"vstar":4344.9945},{"k":"OOS","name":"OOS","tier":null,"vstar":4344.9933},{"k":"OSS","name":"OSS","tier":null,"vstar":4344.693},{"k":"OZZ","name":"OZZ","tier":null,"vstar":4344.6889},{"k":"OSZ","name":"OSZ","tier":null,"vstar":4344.2856},{"k":"SZZ","name":"SZZ","tier":null,"vstar":4343.8414},{"k":"SSZ","name":"SSZ","tier":null,"vstar":4343.8409}]};
+const STORE_KEY = 'pcnn4_human_sort_v1';
+const GAPS = [1, 1.2, 2, 5, 20];
+const GAP_LABELS = ['=', '>', '>>', '>>>', '>>>>'];
+
+const pcs = Object.keys(DATA).map(Number).sort((a, b) => a - b);
+const byKey = {};
+pcs.forEach(pc => DATA[pc].forEach(it => byKey[it.k] = it));
+
+function defaultState(pc) {
+  return {order: DATA[pc].map(it => it.k),
+          gaps: DATA[pc].slice(1).map(() => 1)};
+}
+
+let state = {};
+try { state = JSON.parse(localStorage.getItem(STORE_KEY)) || {}; }
+catch (e) { state = {}; }
+pcs.forEach(pc => {
+  const st = state[pc];
+  const def = defaultState(pc);
+  // discard stale saves that don't match the current segment list
+  if (!st || st.order.length !== def.order.length ||
+      [...st.order].sort().join() !== [...def.order].sort().join()) {
+    state[pc] = def;
+  }
+});
+
+let curPc = pcs[0];
+let selIdx = 0;
+try {
+  const p = parseInt(localStorage.getItem(STORE_KEY + '_pc'));
+  if (pcs.includes(p)) curPc = p;
+} catch (e) {}
+
+function save() {
+  localStorage.setItem(STORE_KEY, JSON.stringify(state));
+  localStorage.setItem(STORE_KEY + '_pc', String(curPc));
+}
+
+function values(pc) {
+  const st = state[pc];
+  const out = [];
+  let v = 100;
+  st.order.forEach((k, i) => {
+    if (i > 0) v /= st.gaps[i - 1];
+    out.push(v);
+  });
+  return out;
+}
+
+function fmt(v) {
+  if (v >= 10) return v.toFixed(0);
+  if (v >= 0.1) return v.toPrecision(3);
+  return v.toExponential(1);
+}
+
+let dragged = null;
+
+function render() {
+  const st = state[curPc];
+  const vals = values(curPc);
+  const minLog = Math.log10(Math.max(vals[vals.length - 1], 1e-12));
+  const span = Math.max(2 - minLog, 1e-9);
+  const list = document.getElementById('list');
+  list.innerHTML = '';
+
+  st.order.forEach((k, i) => {
+    const it = byKey[k];
+    const row = document.createElement('div');
+    row.className = 'row' + (i === selIdx ? ' selected' : '');
+    row.draggable = true;
+    row.dataset.key = k;
+    row.addEventListener('mousedown', () => {
+      if (selIdx !== i) { selIdx = i; render(); }
+    });
+
+    const gap = document.createElement('div');
+    if (i === 0) {
+      gap.className = 'gapchip top-anchor';
+      gap.textContent = 'TOP';
+    } else {
+      const gi = GAPS.indexOf(st.gaps[i - 1]);
+      gap.className = 'gapchip g' + (gi < 0 ? 0 : gi);
+      gap.textContent = GAP_LABELS[gi < 0 ? 0 : gi];
+      gap.title = 'step from row above: x' + st.gaps[i - 1];
+      gap.onclick = (e) => {
+        const cur = GAPS.indexOf(st.gaps[i - 1]);
+        const next = e.shiftKey
+            ? (cur - 1 + GAPS.length) % GAPS.length
+            : (cur + 1) % GAPS.length;
+        st.gaps[i - 1] = GAPS[next];
+        save(); render();
+      };
+    }
+    row.appendChild(gap);
+
+    const rank = document.createElement('div');
+    rank.className = 'rank';
+    rank.textContent = '#' + (i + 1);
+    row.appendChild(rank);
+
+    const name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = it.name;
+    row.appendChild(name);
+
+    const letters = document.createElement('div');
+    letters.className = 'letters';
+    letters.textContent = [...it.k].join(' ');
+    row.appendChild(letters);
+
+    if (it.tier) {
+      const tier = document.createElement('div');
+      tier.className = 'tier ' + it.tier;
+      tier.textContent = it.tier.toUpperCase();
+      row.appendChild(tier);
+    }
+
+    const spacer = document.createElement('div');
+    spacer.className = 'spacer';
+    row.appendChild(spacer);
+
+    const movers = document.createElement('div');
+    movers.className = 'movers';
+    [['▲', -1], ['▼', 1]].forEach(([sym, d]) => {
+      const b = document.createElement('button');
+      b.textContent = sym;
+      b.onclick = () => {
+        const j = i + d;
+        if (j < 0 || j >= st.order.length) return;
+        [st.order[i], st.order[j]] = [st.order[j], st.order[i]];
+        save(); render();
+      };
+      movers.appendChild(b);
+    });
+    row.appendChild(movers);
+
+    const bar = document.createElement('div');
+    bar.className = 'bar';
+    const fill = document.createElement('div');
+    const frac = (Math.log10(Math.max(vals[i], 1e-12)) - minLog) / span;
+    fill.style.width = Math.max(2, 100 * frac).toFixed(1) + '%';
+    bar.appendChild(fill);
+    row.appendChild(bar);
+
+    const val = document.createElement('div');
+    val.className = 'val';
+    val.textContent = fmt(vals[i]);
+    row.appendChild(val);
+
+    row.addEventListener('dragstart', () => {
+      dragged = row; row.classList.add('dragging');
+    });
+    row.addEventListener('dragend', () => {
+      row.classList.remove('dragging');
+      dragged = null;
+      st.order = [...list.children].map(r => r.dataset.key);
+      save(); render();
+    });
+    list.appendChild(row);
+  });
+}
+
+document.getElementById('list').addEventListener('dragover', e => {
+  e.preventDefault();
+  if (!dragged) return;
+  const target = e.target.closest('.row');
+  if (!target || target === dragged) return;
+  const rect = target.getBoundingClientRect();
+  const before = e.clientY < rect.top + rect.height / 2;
+  target.parentNode.insertBefore(dragged,
+      before ? target : target.nextSibling);
+});
+
+document.getElementById('pcSelect').onchange = e => {
+  curPc = parseInt(e.target.value); selIdx = 0;
+  save(); render(); refreshSelect();
+  window.scrollTo(0, 0);
+};
+
+function scrollSelectedIntoView() {
+  const el = document.querySelector('.row.selected');
+  if (el) el.scrollIntoView({block: 'nearest'});
+}
+
+document.addEventListener('keydown', e => {
+  const key = e.key.toLowerCase();
+  if (!'wasd'.includes(key) || e.metaKey || e.ctrlKey || e.altKey) return;
+  const st = state[curPc];
+  const n = st.order.length;
+  e.preventDefault();
+  if (key === 'w' || key === 's') {
+    const d = key === 'w' ? -1 : 1;
+    if (e.shiftKey) {                         // move the selected row
+      const j = selIdx + d;
+      if (j < 0 || j >= n) return;
+      [st.order[selIdx], st.order[j]] = [st.order[j], st.order[selIdx]];
+      selIdx = j;
+      save();
+    } else {                                  // move the selection
+      selIdx = Math.min(n - 1, Math.max(0, selIdx + d));
+    }
+  } else {                                    // a/d: shrink/grow gap
+    if (selIdx === 0) return;                 // top row has no gap
+    const cur = GAPS.indexOf(st.gaps[selIdx - 1]);
+    const next = Math.min(GAPS.length - 1,
+                          Math.max(0, (cur < 0 ? 0 : cur) +
+                                      (key === 'd' ? 1 : -1)));
+    st.gaps[selIdx - 1] = GAPS[next];
+    save();
+  }
+  render();
+  scrollSelectedIntoView();
+});
+function refreshSelect() {
+  const sel = document.getElementById('pcSelect');
+  sel.innerHTML = '';
+  pcs.forEach(pc => {
+    const o = document.createElement('option');
+    o.value = pc;
+    o.text = 'PC ' + pc + '  (' + DATA[pc].length + ' segments)';
+    sel.appendChild(o);
+  });
+  sel.value = curPc;
+}
+
+document.getElementById('exportBtn').onclick = () => {
+  const blob = new Blob(
+      [JSON.stringify({tool: 'human_sort', state: state}, null, 1)],
+      {type: 'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'human_sort_results.json';
+  a.click();
+};
+document.getElementById('importBtn').onclick = () =>
+    document.getElementById('fileImport').click();
+document.getElementById('fileImport').onchange = e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  f.text().then(t => {
+    const data = JSON.parse(t);
+    const imported = data.state || data;
+    Object.keys(imported).forEach(pc => { state[pc] = imported[pc]; });
+    save(); render();
+  });
+};
+document.getElementById('resetBtn').onclick = () => {
+  if (confirm('Reset PC ' + curPc + ' to the default order (all gaps =)?')) {
+    state[curPc] = defaultState(curPc);
+    save(); render();
+  }
+};
+
+refreshSelect();
+render();
+</script>
+</body>
+</html>
