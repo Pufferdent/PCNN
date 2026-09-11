@@ -1,5 +1,7 @@
 # PC-NN-v4
 
+PC-NN is used to identify which Perfect Clear solves are more human-like—especially which solutions people are more likely to find intuitive and choose in practice.
+
 Solve-choice model. Where v3 predicted *placements step by step*, v4 scores a
 **finished solve** and outputs one number: the probability that the player
 would have picked this solve, played in this order.
